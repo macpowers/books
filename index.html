@@ -844,13 +844,29 @@ document.getElementById('randomBtn').onclick = () => {
 };
 
 // ---------- Cover art (Open Library, free, no key needed) ----------
+function cleanTitleForSearch(title) {
+  // Strip trailing parenthetical bits like "(2021)" or "(Bloodsworn #1)" that hurt matching,
+  // plus a leading "The"/"A" isn't touched — only trailing (...) groups and stray whitespace.
+  return title.replace(/\s*\([^)]*\)/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+
 async function fetchCoverUrl(title, author) {
-  const params = new URLSearchParams({ title, limit: '1', fields: 'cover_i' });
+  const cleanTitle = cleanTitleForSearch(title);
+  const params = new URLSearchParams({ title: cleanTitle, limit: '1', fields: 'cover_i' });
   if (author) params.set('author', author);
   const res = await fetch(`https://openlibrary.org/search.json?${params.toString()}`);
   if (!res.ok) throw new Error('Open Library error ' + res.status);
   const data = await res.json();
-  const coverId = data?.docs?.[0]?.cover_i;
+  let coverId = data?.docs?.[0]?.cover_i;
+  // Fallback: retry without author constraint if nothing found (author formatting can also mismatch)
+  if (!coverId && author) {
+    const params2 = new URLSearchParams({ title: cleanTitle, limit: '1', fields: 'cover_i' });
+    const res2 = await fetch(`https://openlibrary.org/search.json?${params2.toString()}`);
+    if (res2.ok) {
+      const data2 = await res2.json();
+      coverId = data2?.docs?.[0]?.cover_i;
+    }
+  }
   if (!coverId) return null;
   return `https://covers.openlibrary.org/b/id/${coverId}-M.jpg`;
 }
