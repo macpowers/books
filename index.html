@@ -142,6 +142,14 @@
   }
   .tier-badge.untiered { background: var(--paper-2); color: var(--muted); }
   .stars { font-size: 12px; color: var(--gold); }
+  .streak-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+  .streak-badge { font-size: 12px; font-weight: 700; color: #b8501f; }
+  .streak-checkin {
+    font-family: inherit; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 100px;
+    border: 1px solid var(--gold); background: #fff8ea; color: #8a6318; cursor: pointer;
+  }
+  .streak-checkin:hover { background: #fbeecb; }
+  .streak-checkin.done { border-color: var(--line); background: var(--paper-2); color: var(--muted); cursor: default; }
 
   .view-toggle { display: flex; gap: 4px; }
   .view-toggle .chip { padding: 8px 12px; }
@@ -399,6 +407,23 @@ async function deleteBook(id) {
   if (error) { toast('Delete failed: ' + error.message); return; }
 }
 
+async function checkInBook(book) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (book.last_streak_date === today) return; // already checked in today
+  let newStreak;
+  if (book.last_streak_date) {
+    const diffDays = Math.round((new Date(today) - new Date(book.last_streak_date)) / 86400000);
+    newStreak = diffDays === 1 ? (book.streak_count || 0) + 1 : 1; // gap of 1+ missed day(s) resets to a fresh streak
+  } else {
+    newStreak = 1;
+  }
+  const saved = await saveBook({ id: book.id, streak_count: newStreak, last_streak_date: today });
+  if (saved) {
+    books = books.map(x => x.id === saved.id ? saved : x);
+    toast(`🔥 ${newStreak} day streak on "${book.title}"`);
+  }
+}
+
 // ---------- Rendering ----------
 function renderConnBanner(msg) {
   const slot = document.getElementById('connBannerSlot');
@@ -510,6 +535,13 @@ function bookCard(b) {
   card.className = 'book-card' + (b.status === 'read' ? ' is-read' : '');
   if (b.difficulty_tier) card.style.setProperty('--tier-color', TIER_COLORS[b.difficulty_tier]);
   const stars = b.rating ? '★'.repeat(b.rating) + '☆'.repeat(5 - b.rating) : '';
+  const today = new Date().toISOString().slice(0, 10);
+  const checkedToday = b.last_streak_date === today;
+  const streakHtml = b.status === 'reading' ? `
+    <div class="streak-row">
+      ${b.streak_count ? `<span class="streak-badge">🔥 ${b.streak_count} day${b.streak_count === 1 ? '' : 's'}</span>` : `<span style="font-size:12px; color:var(--muted);">Start a streak</span>`}
+      <button class="streak-checkin ${checkedToday ? 'done' : ''}" data-checkin="${b.id}">${checkedToday ? '✓ Checked in' : 'Check in today'}</button>
+    </div>` : '';
   const coverHtml = b.cover_url
     ? `<img class="book-cover" src="${escapeHtml(b.cover_url)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;book-cover placeholder&quot;>${(b.title[0] || '?').toUpperCase()}</div>'" />`
     : `<div class="book-cover placeholder">${escapeHtml((b.title[0] || '?').toUpperCase())}</div>`;
@@ -528,9 +560,20 @@ function bookCard(b) {
         </span>
       </div>
       ${stars ? `<div class="stars">${stars}</div>` : ''}
+      ${b.status === 'read' && b.date_finished ? `<div style="font-size:11px; color:var(--muted);">Finished ${new Date(b.date_finished + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</div>` : ''}
+      ${streakHtml}
     </div>
   `;
   card.onclick = () => openBookModal(b);
+  const checkinBtn = card.querySelector('[data-checkin]');
+  if (checkinBtn) {
+    checkinBtn.onclick = async (e) => {
+      e.stopPropagation();
+      if (checkedToday) return;
+      await checkInBook(b);
+      renderGrid();
+    };
+  }
   return card;
 }
 
@@ -595,6 +638,7 @@ function openBookModal(book) {
         <div class="status-picker" id="statusPicker">
           ${Object.entries(STATUS_LABELS).map(([k, v]) => `<div class="status-opt ${b.status === k ? 'selected' : ''}" data-val="${k}">${v}</div>`).join('')}
         </div>
+        <div id="dynamicFieldsSlot"></div>
       </div>
 
       <div class="field">
@@ -631,11 +675,28 @@ function openBookModal(book) {
   let selectedTier = b.difficulty_tier;
   let selectedRating = b.rating;
 
+  function renderDynamicFields() {
+    const slot = overlay.querySelector('#dynamicFieldsSlot');
+    if (selectedStatus === 'read') {
+      const existing = slot.querySelector('#f_date_finished');
+      const currentVal = existing ? existing.value : (b.date_finished ? b.date_finished.slice(0, 10) : '');
+      const defaultVal = currentVal || new Date().toISOString().slice(0, 10);
+      slot.innerHTML = `<div class="field" style="margin-top:10px;"><label>Date finished</label><input type="date" id="f_date_finished" value="${defaultVal}" /></div>`;
+    } else if (selectedStatus === 'reading' && !isNew) {
+      const n = b.streak_count || 0;
+      slot.innerHTML = `<div style="font-size:13px; color:var(--muted); margin-top:8px;">${n ? `🔥 On a ${n} day streak — check in from the book's card on your shelf.` : `No streak yet — check in from the book's card on your shelf to start one.`}</div>`;
+    } else {
+      slot.innerHTML = '';
+    }
+  }
+  renderDynamicFields();
+
   overlay.querySelectorAll('.status-opt').forEach(el => {
     el.onclick = () => {
       selectedStatus = el.dataset.val;
       overlay.querySelectorAll('.status-opt').forEach(x => x.classList.remove('selected'));
       el.classList.add('selected');
+      renderDynamicFields();
     };
   });
   overlay.querySelectorAll('.tier-opt').forEach(el => {
@@ -757,6 +818,7 @@ function openBookModal(book) {
       difficulty_tier: selectedTier || null,
       rating: selectedRating || null,
       notes: overlay.querySelector('#f_notes').value.trim() || null,
+      date_finished: selectedStatus === 'read' ? (overlay.querySelector('#f_date_finished')?.value || null) : (b.date_finished || null),
     };
     if (!isNew) payload.id = b.id;
     const justFinished = selectedStatus === 'read' && b.status !== 'read';
