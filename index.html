@@ -636,7 +636,7 @@ Respond with ONLY a JSON object, no markdown fences, no preamble: {"tier": <1-7 
   });
   if (!response.ok) {
     const errBody = await response.text();
-    throw new Error('Gemini API error ' + response.status + ': ' + errBody.slice(0, 120));
+    throw new Error('Gemini API error ' + response.status + ': ' + errBody.slice(0, 500));
   }
   const data = await response.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
