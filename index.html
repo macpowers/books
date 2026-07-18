@@ -189,6 +189,18 @@
     text-align: center; color: #6b4d1a;
   }
 
+  .batch-progress {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; margin-bottom: 16px; font-size: 13px;
+  }
+  .batch-progress .bar-track {
+    background: var(--paper-2); border-radius: 100px; height: 8px; overflow: hidden; margin-top: 8px;
+  }
+  .batch-progress .bar-fill {
+    background: var(--accent); height: 100%; transition: width .3s ease;
+  }
+  .batch-progress .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+
   @media (prefers-reduced-motion: no-preference) {
     .book-card { transition: transform .15s ease, border-color .15s ease; }
     .book-card:hover { transform: translateY(-2px); }
@@ -235,7 +247,10 @@
       <option value="dnf">Did not finish</option>
     </select>
     <button class="btn secondary" id="randomBtn">🎲 Pick for me</button>
+    <button class="btn secondary" id="batchRateBtn">✨ Auto-rate all</button>
   </div>
+
+  <div id="batchProgressSlot"></div>
 
   <div class="chip-row" id="categoryChips"></div>
 
@@ -704,6 +719,58 @@ document.getElementById('randomBtn').onclick = () => {
   const pick = list[Math.floor(Math.random() * list.length)];
   openBookModal(pick);
   toast(`How about "${pick.title}"?`);
+};
+
+let batchRunning = false;
+document.getElementById('batchRateBtn').onclick = async () => {
+  if (batchRunning) return;
+  if (!GEMINI_KEY) { toast('Add a free Gemini key in ⚙ Settings first'); return; }
+  const todo = books.filter(b => !b.difficulty_tier);
+  if (!todo.length) { toast('Every book already has a tier'); return; }
+  if (!confirm(`Auto-rate ${todo.length} book(s)? This runs in the background and paces itself to stay within the free API limit — it may take a few minutes.`)) return;
+
+  batchRunning = true;
+  const btn = document.getElementById('batchRateBtn');
+  btn.disabled = true;
+  const slot = document.getElementById('batchProgressSlot');
+  let done = 0, failed = 0;
+
+  function renderProgress(currentTitle) {
+    const pct = Math.round((done / todo.length) * 100);
+    slot.innerHTML = `
+      <div class="batch-progress">
+        <div class="row">
+          <span>Rating "${escapeHtml(currentTitle || '')}"…</span>
+          <span>${done}/${todo.length}${failed ? ' · ' + failed + ' skipped' : ''}</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+      </div>`;
+  }
+  renderProgress(todo[0]?.title);
+
+  for (const b of todo) {
+    if (!batchRunning) break;
+    renderProgress(b.title);
+    try {
+      const suggestion = await suggestDifficulty(b.title, b.author);
+      const saved = await saveBook({ id: b.id, difficulty_tier: suggestion.tier });
+      if (saved) books = books.map(x => x.id === saved.id ? saved : x);
+    } catch (e) {
+      failed++;
+    }
+    done++;
+    renderProgress(b.title);
+    renderGrid();
+    // pace requests to stay under free-tier rate limits
+    await new Promise(r => setTimeout(r, 4500));
+  }
+
+  batchRunning = false;
+  btn.disabled = false;
+  slot.innerHTML = `<div class="batch-progress">Done — rated ${done - failed} of ${todo.length}${failed ? `, ${failed} skipped (rate limit or error, try again later)` : ''}.</div>`;
+  setTimeout(() => { slot.innerHTML = ''; }, 6000);
+  renderAll();
+  toast('Auto-rating finished');
 };
 
 // ---------- Init ----------
