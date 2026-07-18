@@ -8,16 +8,16 @@
   @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap');
 
   :root {
-    --ink: #241f1a;
-    --paper: #f6f1e7;
-    --paper-2: #ede4d3;
-    --line: #d8cbb0;
+    --ink: #23271f;
+    --paper: #eef2e9;
+    --paper-2: #dee7d7;
+    --line: #c3d0ba;
     --accent: #8a3b2f;
     --accent-2: #2f5233;
     --gold: #b8873a;
-    --muted: #7a7061;
-    --card: #fffdf8;
-    --shadow: 0 1px 2px rgba(36,31,26,0.06), 0 4px 14px rgba(36,31,26,0.06);
+    --muted: #6d7867;
+    --card: #f8faf6;
+    --shadow: 0 1px 2px rgba(35,39,31,0.06), 0 4px 14px rgba(35,39,31,0.06);
     --radius: 10px;
   }
 
@@ -107,9 +107,9 @@
   }
   .book-card:hover { border-color: var(--accent); }
   .book-card.is-read {
-    background: #eef4ea; border-color: #bcd4b0;
+    background: #d6e6c6; border-color: #99c179;
   }
-  .book-card.is-read .book-title { color: #2f5233; }
+  .book-card.is-read .book-title { color: #24401f; }
   .read-check {
     position: absolute; top: 10px; right: 10px; width: 22px; height: 22px; border-radius: 50%;
     background: var(--accent-2); color: white; font-size: 13px; font-weight: 700;
@@ -845,30 +845,60 @@ document.getElementById('randomBtn').onclick = () => {
 
 // ---------- Cover art (Open Library, free, no key needed) ----------
 function cleanTitleForSearch(title) {
-  // Strip trailing parenthetical bits like "(2021)" or "(Bloodsworn #1)" that hurt matching,
-  // plus a leading "The"/"A" isn't touched — only trailing (...) groups and stray whitespace.
+  // Strip trailing parenthetical bits like "(2021)" or "(Bloodsworn #1)" that hurt matching.
   return title.replace(/\s*\([^)]*\)/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
-async function fetchCoverUrl(title, author) {
-  const cleanTitle = cleanTitleForSearch(title);
-  const params = new URLSearchParams({ title: cleanTitle, limit: '1', fields: 'cover_i' });
+function titleVariants(rawTitle) {
+  const clean = cleanTitleForSearch(rawTitle);
+  const variants = [clean];
+  // "A / B" alternate-title format (e.g. "The Stranger / The Outsider") — try each side
+  if (clean.includes('/')) {
+    clean.split('/').forEach(part => { const p = part.trim(); if (p) variants.push(p); });
+  }
+  // "Series Name: Book Title" — try both the part before and after the colon
+  if (clean.includes(':')) {
+    const [before, ...rest] = clean.split(':');
+    const after = rest.join(':').trim();
+    if (before.trim()) variants.push(before.trim());
+    if (after) variants.push(after);
+  }
+  return [...new Set(variants)];
+}
+
+async function tryFetchCover(query, author) {
+  const params = new URLSearchParams({ title: query, limit: '1', fields: 'cover_i' });
   if (author) params.set('author', author);
   const res = await fetch(`https://openlibrary.org/search.json?${params.toString()}`);
-  if (!res.ok) throw new Error('Open Library error ' + res.status);
+  if (!res.ok) return null;
   const data = await res.json();
-  let coverId = data?.docs?.[0]?.cover_i;
-  // Fallback: retry without author constraint if nothing found (author formatting can also mismatch)
-  if (!coverId && author) {
-    const params2 = new URLSearchParams({ title: cleanTitle, limit: '1', fields: 'cover_i' });
-    const res2 = await fetch(`https://openlibrary.org/search.json?${params2.toString()}`);
-    if (res2.ok) {
-      const data2 = await res2.json();
-      coverId = data2?.docs?.[0]?.cover_i;
+  return data?.docs?.[0]?.cover_i || null;
+}
+
+async function fetchCoverUrl(title, author) {
+  const variants = titleVariants(title);
+  // Pass 1: each variant with author constraint
+  for (const v of variants) {
+    const id = await tryFetchCover(v, author);
+    if (id) return `https://covers.openlibrary.org/b/id/${id}-M.jpg`;
+  }
+  // Pass 2: each variant without author (author formatting can itself mismatch)
+  if (author) {
+    for (const v of variants) {
+      const id = await tryFetchCover(v, null);
+      if (id) return `https://covers.openlibrary.org/b/id/${id}-M.jpg`;
     }
   }
-  if (!coverId) return null;
-  return `https://covers.openlibrary.org/b/id/${coverId}-M.jpg`;
+  // Pass 3: fuzzy full-text search as a last resort
+  const q = `${variants[0]}${author ? ' ' + author : ''}`;
+  const params = new URLSearchParams({ q, limit: '1', fields: 'cover_i' });
+  const res = await fetch(`https://openlibrary.org/search.json?${params.toString()}`);
+  if (res.ok) {
+    const data = await res.json();
+    const id = data?.docs?.[0]?.cover_i;
+    if (id) return `https://covers.openlibrary.org/b/id/${id}-M.jpg`;
+  }
+  return null;
 }
 
 let coverBatchRunning = false;
