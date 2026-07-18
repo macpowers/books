@@ -143,6 +143,32 @@
   .tier-badge.untiered { background: var(--paper-2); color: var(--muted); }
   .stars { font-size: 12px; color: var(--gold); }
 
+  .view-toggle { display: flex; gap: 4px; }
+  .view-toggle .chip { padding: 8px 12px; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
+  table.book-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .book-table th {
+    text-align: left; padding: 9px 10px; background: var(--paper-2); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .03em; color: var(--muted); white-space: nowrap;
+  }
+  .book-table td { padding: 6px 10px; border-top: 1px solid var(--line); vertical-align: middle; }
+  .book-table tbody tr { cursor: pointer; }
+  .book-table tbody tr:hover td { background: var(--paper-2); }
+  .book-table tbody tr.is-read td { background: #d6e6c6; }
+  .book-table tbody tr.is-read .row-title { color: #24401f; }
+  .row-cover {
+    width: 28px; height: 40px; object-fit: cover; border-radius: 3px; background: var(--paper-2); display: block;
+  }
+  .row-cover.placeholder {
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 12px; color: var(--muted);
+  }
+  .row-title { font-weight: 600; white-space: nowrap; }
+  .row-author { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .row-tier-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .row-stars { color: var(--gold); white-space: nowrap; font-size: 12px; }
+
   .empty-state {
     text-align: center; padding: 60px 20px; color: var(--muted);
   }
@@ -268,6 +294,10 @@
     <button class="btn secondary" id="randomBtn">🎲 Pick for me</button>
     <button class="btn secondary" id="batchRateBtn">✨ Auto-rate all</button>
     <button class="btn secondary" id="batchCoverBtn">🖼️ Fetch cover art</button>
+    <div class="view-toggle">
+      <button class="chip active" id="viewGridBtn">▦ Grid</button>
+      <button class="chip" id="viewTableBtn">☰ List</button>
+    </div>
   </div>
 
   <div id="batchProgressSlot"></div>
@@ -326,7 +356,7 @@ const STATUS_LABELS = {
 };
 
 let books = [];
-let state = { search: '', category: '', status: '', sort: 'title' };
+let state = { search: '', category: '', status: '', sort: 'title', view: localStorage.getItem('shelf_view') || 'grid' };
 
 // ---------- Toast ----------
 function toast(msg) {
@@ -431,11 +461,48 @@ function filteredSorted() {
 
 function renderGrid() {
   const list = filteredSorted();
-  const grid = document.getElementById('bookGrid');
+  const container = document.getElementById('bookGrid');
   const empty = document.getElementById('emptyState');
-  grid.innerHTML = '';
   empty.style.display = list.length === 0 ? 'block' : 'none';
-  list.forEach(b => grid.appendChild(bookCard(b)));
+
+  if (state.view === 'table') {
+    container.className = 'table-wrap';
+    container.innerHTML = renderTableHtml(list);
+    container.querySelectorAll('tbody tr').forEach(tr => {
+      tr.onclick = () => openBookModal(list.find(b => b.id === tr.dataset.id));
+    });
+  } else {
+    container.className = 'grid';
+    container.innerHTML = '';
+    list.forEach(b => container.appendChild(bookCard(b)));
+  }
+}
+
+function renderTableHtml(list) {
+  const rows = list.map(b => {
+    const coverCell = b.cover_url
+      ? `<img class="row-cover" src="${escapeHtml(b.cover_url)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;row-cover placeholder&quot;>${(b.title[0] || '?').toUpperCase()}</div>'" />`
+      : `<div class="row-cover placeholder">${escapeHtml((b.title[0] || '?').toUpperCase())}</div>`;
+    const tierCell = b.difficulty_tier
+      ? `<span class="row-tier-dot" style="background:${TIER_COLORS[b.difficulty_tier]}"></span>T${b.difficulty_tier}`
+      : `<span style="color:var(--muted)">—</span>`;
+    const stars = b.rating ? `<span class="row-stars">${'★'.repeat(b.rating)}</span>` : '';
+    return `
+      <tr class="${b.status === 'read' ? 'is-read' : ''}" data-id="${b.id}">
+        <td>${coverCell}</td>
+        <td><div class="row-title">${escapeHtml(b.title)}</div><div class="row-author">${escapeHtml(b.author || '')}</div></td>
+        <td>${escapeHtml(b.category)}</td>
+        <td><span class="tag status-${b.status}">${STATUS_LABELS[b.status]}</span></td>
+        <td>${tierCell}</td>
+        <td>${b.length ? b.length + 'p' : ''}</td>
+        <td>${stars}</td>
+      </tr>`;
+  }).join('');
+  return `
+    <table class="book-table">
+      <thead><tr><th></th><th>Title</th><th>Category</th><th>Status</th><th>Tier</th><th>Length</th><th>Rating</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 function bookCard(b) {
@@ -834,6 +901,15 @@ document.getElementById('sortSelect').onchange = (e) => { state.sort = e.target.
 document.getElementById('statusFilter').onchange = (e) => { state.status = e.target.value; renderGrid(); };
 document.getElementById('addFab').onclick = () => openBookModal(null);
 document.getElementById('settingsFab').onclick = () => openSettingsModal();
+document.getElementById('viewGridBtn').onclick = () => setView('grid');
+document.getElementById('viewTableBtn').onclick = () => setView('table');
+function setView(v) {
+  state.view = v;
+  localStorage.setItem('shelf_view', v);
+  document.getElementById('viewGridBtn').classList.toggle('active', v === 'grid');
+  document.getElementById('viewTableBtn').classList.toggle('active', v === 'table');
+  renderGrid();
+}
 document.getElementById('randomBtn').onclick = () => {
   const pool = filteredSorted().filter(b => b.status === 'want_to_read');
   const list = pool.length ? pool : filteredSorted();
@@ -1004,6 +1080,8 @@ document.getElementById('batchRateBtn').onclick = async () => {
 };
 
 // ---------- Init ----------
+document.getElementById('viewGridBtn').classList.toggle('active', state.view === 'grid');
+document.getElementById('viewTableBtn').classList.toggle('active', state.view === 'table');
 loadBooks();
 </script>
 </body>
