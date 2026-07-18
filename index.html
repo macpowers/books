@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Shelf — Reading Tracker</title>
+<title>Mac's Bookshelf</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -102,10 +102,20 @@
 
   .book-card {
     background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-    padding: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px;
+    padding: 12px; box-shadow: var(--shadow); display: flex; flex-direction: row; gap: 12px;
     cursor: pointer; position: relative; border-left: 4px solid var(--tier-color, var(--line));
   }
   .book-card:hover { border-color: var(--accent); }
+  .book-cover {
+    flex: none; width: 56px; height: 84px; border-radius: 4px; object-fit: cover;
+    background: var(--paper-2); box-shadow: 0 1px 4px rgba(0,0,0,.15);
+  }
+  .book-cover.placeholder {
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 18px; color: var(--muted);
+    background: linear-gradient(150deg, var(--paper-2), var(--line));
+  }
+  .book-card-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
   .book-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px; line-height: 1.25; }
   .book-author { font-size: 13px; color: var(--muted); }
   .book-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
@@ -216,7 +226,7 @@
 <header>
   <div class="header-inner">
     <div>
-      <h1>Shelf<span class="accent-dot">.</span></h1>
+      <h1>Mac's Bookshelf<span class="accent-dot">.</span></h1>
       <div class="tagline">your reading list, ranked and ready</div>
     </div>
     <div class="stats-row" id="statsRow"></div>
@@ -248,6 +258,7 @@
     </select>
     <button class="btn secondary" id="randomBtn">🎲 Pick for me</button>
     <button class="btn secondary" id="batchRateBtn">✨ Auto-rate all</button>
+    <button class="btn secondary" id="batchCoverBtn">🖼️ Fetch cover art</button>
   </div>
 
   <div id="batchProgressSlot"></div>
@@ -423,18 +434,24 @@ function bookCard(b) {
   card.className = 'book-card';
   if (b.difficulty_tier) card.style.setProperty('--tier-color', TIER_COLORS[b.difficulty_tier]);
   const stars = b.rating ? '★'.repeat(b.rating) + '☆'.repeat(5 - b.rating) : '';
+  const coverHtml = b.cover_url
+    ? `<img class="book-cover" src="${escapeHtml(b.cover_url)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;book-cover placeholder&quot;>${(b.title[0] || '?').toUpperCase()}</div>'" />`
+    : `<div class="book-cover placeholder">${escapeHtml((b.title[0] || '?').toUpperCase())}</div>`;
   card.innerHTML = `
-    <div class="book-title">${escapeHtml(b.title)}</div>
-    <div class="book-author">${escapeHtml(b.author || 'Unknown author')}</div>
-    <div class="book-meta">
-      <span class="tag status-${b.status}">${STATUS_LABELS[b.status]}</span>
-      <span class="tag">${escapeHtml(b.category)}</span>
-      ${b.length ? `<span class="tag">${b.length}p</span>` : ''}
-      <span class="tier-badge ${b.difficulty_tier ? '' : 'untiered'}" style="${b.difficulty_tier ? `background:${TIER_COLORS[b.difficulty_tier]}` : ''}">
-        ${b.difficulty_tier ? 'T' + b.difficulty_tier + ' · ' + TIER_LABELS[b.difficulty_tier] : 'Unrated'}
-      </span>
+    ${coverHtml}
+    <div class="book-card-body">
+      <div class="book-title">${escapeHtml(b.title)}</div>
+      <div class="book-author">${escapeHtml(b.author || 'Unknown author')}</div>
+      <div class="book-meta">
+        <span class="tag status-${b.status}">${STATUS_LABELS[b.status]}</span>
+        <span class="tag">${escapeHtml(b.category)}</span>
+        ${b.length ? `<span class="tag">${b.length}p</span>` : ''}
+        <span class="tier-badge ${b.difficulty_tier ? '' : 'untiered'}" style="${b.difficulty_tier ? `background:${TIER_COLORS[b.difficulty_tier]}` : ''}">
+          ${b.difficulty_tier ? 'T' + b.difficulty_tier + ' · ' + TIER_LABELS[b.difficulty_tier] : 'Unrated'}
+        </span>
+      </div>
+      ${stars ? `<div class="stars">${stars}</div>` : ''}
     </div>
-    ${stars ? `<div class="stars">${stars}</div>` : ''}
   `;
   card.onclick = () => openBookModal(b);
   return card;
@@ -465,6 +482,10 @@ function openBookModal(book) {
     <div class="modal">
       <h2>${isNew ? 'Add a book' : 'Edit book'}</h2>
       <div class="sub">${isNew ? 'Add it to your shelf' : 'Update details, status, or rating'}</div>
+      ${isNew ? `
+      <button class="btn secondary" id="suggestBookBtn" style="width:100%; margin-bottom:14px;">✨ Suggest a book for me</button>
+      <div id="suggestParamsSlot"></div>
+      ` : ''}
 
       <div class="field">
         <label>Title</label>
@@ -582,6 +603,58 @@ function openBookModal(book) {
   overlay.querySelector('#cancelBtn').onclick = () => overlay.remove();
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
+  if (isNew) {
+    overlay.querySelector('#suggestBookBtn').onclick = () => {
+      const cats = getCategories();
+      const pSlot = overlay.querySelector('#suggestParamsSlot');
+      pSlot.innerHTML = `
+        <div class="ai-suggest-box">
+          <div class="field" style="margin-bottom:8px;">
+            <label>Category</label>
+            <select id="p_category">
+              <option value="">Any / surprise me</option>
+              ${cats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" style="margin-bottom:8px;">
+            <label>Difficulty</label>
+            <select id="p_difficulty">
+              <option value="">Any</option>
+              <option value="1-2">Easy (tier 1–2)</option>
+              <option value="3-4">Moderate (tier 3–4)</option>
+              <option value="5-7">Challenging+ (tier 5–7)</option>
+            </select>
+          </div>
+          <div class="field" style="margin-bottom:8px;">
+            <label>Anything else? (optional)</label>
+            <input type="text" id="p_note" placeholder="e.g. similar to Mistborn, under 400 pages" />
+          </div>
+          <button class="btn accent" id="p_go" style="width:100%;">Get suggestion</button>
+        </div>`;
+      pSlot.querySelector('#p_go').onclick = async () => {
+        const category = pSlot.querySelector('#p_category').value;
+        const difficulty = pSlot.querySelector('#p_difficulty').value;
+        const note = pSlot.querySelector('#p_note').value.trim();
+        pSlot.innerHTML = `<div class="ai-suggest-box loading">Thinking of something for you…</div>`;
+        try {
+          const suggestion = await suggestNewBook({ category, difficulty, note, existingTitles: books.map(b => b.title) });
+          overlay.querySelector('#f_title').value = suggestion.title;
+          overlay.querySelector('#f_author').value = suggestion.author || '';
+          overlay.querySelector('#f_category').value = suggestion.category || category || '';
+          overlay.querySelector('#f_length').value = suggestion.length || '';
+          if (suggestion.tier) {
+            selectedTier = suggestion.tier;
+            overlay.querySelectorAll('.tier-opt').forEach(x => x.classList.toggle('selected', parseInt(x.dataset.val) === suggestion.tier));
+          }
+          pSlot.innerHTML = `<div class="ai-suggest-box"><b>${escapeHtml(suggestion.title)}</b> — ${escapeHtml(suggestion.reason || '')}<br><button class="btn secondary" id="p_again" style="margin-top:8px;">Try another</button></div>`;
+          pSlot.querySelector('#p_again').onclick = () => overlay.querySelector('#suggestBookBtn').onclick();
+        } catch (e) {
+          pSlot.innerHTML = `<div class="ai-suggest-box">Couldn't get a suggestion (${escapeHtml(e.message)}). Fill in the form manually below, or try again.</div>`;
+        }
+      };
+    };
+  }
+
   if (!isNew) {
     overlay.querySelector('#deleteBtn').onclick = async () => {
       if (!confirm(`Remove "${b.title}" from your shelf?`)) return;
@@ -662,6 +735,44 @@ Respond with ONLY a JSON object, no markdown fences, no preamble: {"tier": <1-7 
   return parsed;
 }
 
+// ---------- AI new-book suggestion ----------
+async function suggestNewBook({ category, difficulty, note, existingTitles }) {
+  if (!GEMINI_KEY) {
+    const err = new Error('No Gemini API key set — add one in ⚙ Settings');
+    err.needsKey = true;
+    throw err;
+  }
+  const diffText = difficulty ? `It should land around tier ${difficulty} on a 7-tier difficulty scale (1=breezy, 7=brutal/academic).` : '';
+  const catText = category ? `It should fit the category "${category}".` : 'Pick whatever category fits best.';
+  const noteText = note ? `Additional preference: ${note}.` : '';
+
+  const prompt = `Recommend ONE book for a personal reading tracker app.
+
+${catText} ${diffText} ${noteText}
+
+Do NOT recommend any of these books already on the shelf: ${existingTitles.slice(0, 300).join(' | ')}
+
+Respond with ONLY a JSON object, no markdown fences, no preamble:
+{"title": "<book title>", "author": "<author name>", "category": "<short category label>", "length": <approx page count as integer>, "tier": <1-7 integer difficulty>, "reason": "<one short sentence, under 25 words, on why this fits>"}`;
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${GEMINI_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+  });
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error('Gemini API error ' + response.status + ': ' + errBody.slice(0, 200));
+  }
+  const data = await response.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('No response from Gemini');
+  const clean = text.replace(/```json|```/g, '').trim();
+  const parsed = JSON.parse(clean);
+  if (!parsed.title) throw new Error('No title returned');
+  return parsed;
+}
+
 // ---------- Settings modal ----------
 function openSettingsModal() {
   const overlay = document.createElement('div');
@@ -719,6 +830,68 @@ document.getElementById('randomBtn').onclick = () => {
   const pick = list[Math.floor(Math.random() * list.length)];
   openBookModal(pick);
   toast(`How about "${pick.title}"?`);
+};
+
+// ---------- Cover art (Open Library, free, no key needed) ----------
+async function fetchCoverUrl(title, author) {
+  const params = new URLSearchParams({ title, limit: '1', fields: 'cover_i' });
+  if (author) params.set('author', author);
+  const res = await fetch(`https://openlibrary.org/search.json?${params.toString()}`);
+  if (!res.ok) throw new Error('Open Library error ' + res.status);
+  const data = await res.json();
+  const coverId = data?.docs?.[0]?.cover_i;
+  if (!coverId) return null;
+  return `https://covers.openlibrary.org/b/id/${coverId}-M.jpg`;
+}
+
+let coverBatchRunning = false;
+document.getElementById('batchCoverBtn').onclick = async () => {
+  if (coverBatchRunning) return;
+  const todo = books.filter(b => !b.cover_url);
+  if (!todo.length) { toast('Every book already has cover art (or none was found)'); return; }
+  if (!confirm(`Look up cover art for ${todo.length} book(s)? This runs in the background.`)) return;
+
+  coverBatchRunning = true;
+  const btn = document.getElementById('batchCoverBtn');
+  btn.disabled = true;
+  const slot = document.getElementById('batchProgressSlot');
+  let done = 0, found = 0;
+
+  function renderProgress(currentTitle) {
+    const pct = Math.round((done / todo.length) * 100);
+    slot.innerHTML = `
+      <div class="batch-progress">
+        <div class="row">
+          <span>Looking up "${escapeHtml(currentTitle || '')}"…</span>
+          <span>${done}/${todo.length} · ${found} found</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+      </div>`;
+  }
+  renderProgress(todo[0]?.title);
+
+  for (const b of todo) {
+    if (!coverBatchRunning) break;
+    renderProgress(b.title);
+    try {
+      const url = await fetchCoverUrl(b.title, b.author);
+      if (url) {
+        const saved = await saveBook({ id: b.id, cover_url: url });
+        if (saved) { books = books.map(x => x.id === saved.id ? saved : x); found++; }
+      }
+    } catch (e) { /* skip on error, try again later */ }
+    done++;
+    renderProgress(b.title);
+    renderGrid();
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  coverBatchRunning = false;
+  btn.disabled = false;
+  slot.innerHTML = `<div class="batch-progress">Done — found covers for ${found} of ${todo.length}.</div>`;
+  setTimeout(() => { slot.innerHTML = ''; }, 6000);
+  renderAll();
+  toast('Cover lookup finished');
 };
 
 let batchRunning = false;
