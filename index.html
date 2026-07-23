@@ -701,60 +701,80 @@ function renderGrid() {
   }
 }
 
-const TIER_UNLOCK_THRESHOLD = 0.5; // fraction of a tier that must be 'read' to unlock the next
+const TIER_UNLOCK_THRESHOLD = 0.5; // fraction of a tier that must be 'read' to unlock the next tier
+const TIER_SLOT_SIZE = 3; // how many not-yet-started books are revealed at once, per tier
+
+// Which books in a tier are actually revealed right now: anything already
+// 'reading' or 'read' always shows, plus just enough of the shortest
+// not-yet-started books to fill the slot count. Finishing (or dropping) one
+// frees a slot and the next-shortest book in the queue drips in.
+function tierRevealed(tierBooks) {
+  const engaged = tierBooks.filter(b => b.status === 'reading' || b.status === 'read');
+  const queue = tierBooks
+    .filter(b => b.status !== 'reading' && b.status !== 'read')
+    .sort((a, b) => (a.length || 99999) - (b.length || 99999));
+  const readingCount = tierBooks.filter(b => b.status === 'reading').length;
+  const slotsLeft = Math.max(0, TIER_SLOT_SIZE - readingCount);
+  const revealedQueue = queue.slice(0, slotsLeft);
+  return new Set([...engaged, ...revealedQueue].map(b => b.id));
+}
 
 function renderMapHtml() {
-  const cats = getCategories();
-  if (!cats.length) return `<div class="empty-state"><div class="big">No books yet</div><div>Add some books to see your map.</div></div>`;
+  const tiered = books.filter(b => b.difficulty_tier);
+  const untiered = books.filter(b => !b.difficulty_tier);
+  if (!books.length) return `<div class="empty-state"><div class="big">No books yet</div><div>Add some books to see your map.</div></div>`;
 
-  return cats.map(cat => {
-    const catBooks = books.filter(b => b.category === cat);
-    const tiered = catBooks.filter(b => b.difficulty_tier);
-    const untiered = catBooks.filter(b => !b.difficulty_tier);
+  let prevTierUnlockedRatio = 1; // tier 1 always unlocked
+  const tierRows = [];
+  for (let t = 1; t <= 7; t++) {
+    const tierBooks = tiered.filter(b => b.difficulty_tier === t);
+    if (!tierBooks.length) continue;
+    const unlocked = t === 1 || prevTierUnlockedRatio >= TIER_UNLOCK_THRESHOLD;
+    const readCount = tierBooks.filter(b => b.status === 'read').length;
+    const ratio = tierBooks.length ? readCount / tierBooks.length : 0;
 
-    let prevTierUnlockedRatio = 1; // tier 1 always unlocked
-    const tierRows = [];
-    for (let t = 1; t <= 7; t++) {
-      const tierBooks = tiered.filter(b => b.difficulty_tier === t);
-      if (!tierBooks.length) continue;
-      const unlocked = t === 1 || prevTierUnlockedRatio >= TIER_UNLOCK_THRESHOLD;
-      const readCount = tierBooks.filter(b => b.status === 'read').length;
-      const ratio = tierBooks.length ? readCount / tierBooks.length : 0;
-
-      const nodesHtml = unlocked
-        ? tierBooks.map(b => `
-            <div class="map-node ${b.status === 'read' ? 'node-read' : ''}" data-mapnode="${b.id}">
-              <div class="map-node-title">${escapeHtml(b.title)}</div>
-              <div class="map-node-author">${escapeHtml(b.author || '')}</div>
-            </div>`).join('')
-        : `<div class="map-node node-locked"><div class="map-node-locked-label">🔒 ${tierBooks.length} book${tierBooks.length === 1 ? '' : 's'} — finish more of Tier ${t - 1} to unlock</div></div>`;
-
-      tierRows.push(`
-        <div class="map-tier-row">
-          <div class="map-tier-head">
-            <span class="map-tier-dot" style="background:${TIER_COLORS[t]}"></span>
-            Tier ${t} · ${TIER_LABELS[t]}
-            <span class="map-tier-progress">${unlocked ? `${readCount}/${tierBooks.length} read` : ''}</span>
-          </div>
-          <div class="map-nodes">${nodesHtml}</div>
-        </div>`);
-
-      if (unlocked) prevTierUnlockedRatio = ratio;
-      else prevTierUnlockedRatio = 0; // a locked tier blocks everything above it too
+    let nodesHtml;
+    if (!unlocked) {
+      nodesHtml = `<div class="map-node node-locked"><div class="map-node-locked-label">🔒 ${tierBooks.length} book${tierBooks.length === 1 ? '' : 's'} — finish more of Tier ${t - 1} to unlock</div></div>`;
+    } else {
+      const revealed = tierRevealed(tierBooks);
+      const shown = tierBooks.filter(b => revealed.has(b.id));
+      const waiting = tierBooks.length - shown.length;
+      nodesHtml = shown.map(b => `
+        <div class="map-node ${b.status === 'read' ? 'node-read' : ''}" data-mapnode="${b.id}">
+          <div class="map-node-title">${escapeHtml(b.title)}</div>
+          <div class="map-node-author">${escapeHtml(b.author || '')}${b.category ? ' · ' + escapeHtml(b.category) : ''}</div>
+        </div>`).join('');
+      if (waiting > 0) {
+        nodesHtml += `<div class="map-node node-locked"><div class="map-node-locked-label">+${waiting} more waiting — finish one above to reveal the next</div></div>`;
+      }
     }
 
-    const untieredHtml = untiered.length ? `
+    tierRows.push(`
       <div class="map-tier-row">
-        <div class="map-tier-head"><span class="map-tier-dot" style="background:var(--muted)"></span>Unrated</div>
-        <div class="map-nodes">${untiered.map(b => `
-          <div class="map-node ${b.status === 'read' ? 'node-read' : ''}" data-mapnode="${b.id}">
-            <div class="map-node-title">${escapeHtml(b.title)}</div>
-            <div class="map-node-author">${escapeHtml(b.author || '')}</div>
-          </div>`).join('')}</div>
-      </div>` : '';
+        <div class="map-tier-head">
+          <span class="map-tier-dot" style="background:${TIER_COLORS[t]}"></span>
+          Tier ${t} · ${TIER_LABELS[t]}
+          <span class="map-tier-progress">${unlocked ? `${readCount}/${tierBooks.length} read` : ''}</span>
+        </div>
+        <div class="map-nodes">${nodesHtml}</div>
+      </div>`);
 
-    return `<div class="map-category"><div class="map-cat-title">${escapeHtml(cat)}</div>${tierRows.join('')}${untieredHtml}</div>`;
-  }).join('');
+    if (unlocked) prevTierUnlockedRatio = ratio;
+    else prevTierUnlockedRatio = 0; // a locked tier blocks everything above it too
+  }
+
+  const untieredHtml = untiered.length ? `
+    <div class="map-tier-row">
+      <div class="map-tier-head"><span class="map-tier-dot" style="background:var(--muted)"></span>Unrated</div>
+      <div class="map-nodes">${untiered.map(b => `
+        <div class="map-node ${b.status === 'read' ? 'node-read' : ''}" data-mapnode="${b.id}">
+          <div class="map-node-title">${escapeHtml(b.title)}</div>
+          <div class="map-node-author">${escapeHtml(b.author || '')}${b.category ? ' · ' + escapeHtml(b.category) : ''}</div>
+        </div>`).join('')}</div>
+    </div>` : '';
+
+  return `<div class="map-category">${tierRows.join('')}${untieredHtml}</div>`;
 }
 
 function renderTableHtml(list) {
