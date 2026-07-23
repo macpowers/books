@@ -261,6 +261,77 @@
   @media (max-width: 640px) {
     .footer-fab { flex-direction: column; }
   }
+
+  /* ---------- Reading Quest: global ember streak ---------- */
+  .quest-panel {
+    position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 4px 20px 0;
+  }
+  .quest-card {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 16px 18px; display: flex; align-items: center; gap: 16px;
+    flex-wrap: wrap; margin-bottom: 4px;
+  }
+  .ember-wrap { position: relative; width: 46px; height: 46px; flex: none; display: grid; place-items: center; }
+  .ember-glow {
+    position: absolute; border-radius: 50%;
+    background: radial-gradient(circle at 50% 42%, var(--gold) 0%, var(--accent) 55%, rgba(138,59,47,0) 75%);
+  }
+  .ember-core { position: relative; width: 12px; height: 12px; border-radius: 50%; background: var(--gold); }
+  @keyframes emberFlicker { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+  @media (prefers-reduced-motion: no-preference) {
+    .ember-glow.lit { animation: emberFlicker 3.2s ease-in-out infinite; }
+  }
+  .quest-streak-num { font-family: 'Fraunces', serif; font-size: 28px; font-weight: 700; line-height: 1; color: var(--accent); }
+  .quest-streak-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .quest-status { font-size: 13px; color: var(--muted); flex: 1 1 200px; min-width: 160px; }
+  .quest-log-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .quest-log-btn {
+    font-family: inherit; font-size: 13px; font-weight: 700; padding: 8px 12px; border-radius: 8px;
+    border: 1px solid var(--gold); background: #fff8ea; color: #8a6318; cursor: pointer;
+  }
+  .quest-log-btn:hover { background: #fbeecb; }
+
+  /* ---------- Map view ---------- */
+  .map-category { margin-bottom: 22px; }
+  .map-cat-title { font-family: 'Fraunces', serif; font-size: 18px; font-weight: 600; margin-bottom: 10px; }
+  .map-tier-row { margin-bottom: 14px; }
+  .map-tier-head {
+    display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 6px;
+  }
+  .map-tier-dot { width: 9px; height: 9px; border-radius: 50%; }
+  .map-tier-progress { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); }
+  .map-nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .map-node {
+    text-align: left; border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 11px;
+    background: var(--card); cursor: pointer; min-height: 70px; display: flex; flex-direction: column;
+    justify-content: center; gap: 3px;
+  }
+  .map-node:hover { border-color: var(--accent); }
+  .map-node.node-read { background: #d6e6c6; border-color: #99c179; }
+  .map-node.node-locked { background: var(--paper-2); color: var(--muted); cursor: default; opacity: .65; }
+  .map-node-title { font-weight: 600; font-size: 13px; line-height: 1.25; }
+  .map-node-author { font-size: 11px; color: var(--muted); }
+  .map-node-locked-label { font-size: 12px; color: var(--muted); }
+
+  /* ---------- Per-book quest section (inside modal) ---------- */
+  .quest-modal-section {
+    background: var(--paper-2); border-radius: 8px; padding: 12px 14px; margin: 14px 0;
+  }
+  .quest-modal-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); margin-bottom: 8px; }
+  .quest-stairs { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 8px; }
+  .quest-stair { width: 12px; height: 12px; border-radius: 3px; background: var(--line); }
+  .quest-stair.lit { background: var(--gold); }
+  .quest-modal-mins { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .quest-modal-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .quest-correct-toggle {
+    font-size: 12px; background: none; border: 1px dashed var(--line); border-radius: 8px;
+    padding: 6px 10px; cursor: pointer; color: var(--muted); margin-top: 8px;
+  }
+  .quest-correct-panel { margin-top: 8px; }
+  .quest-correct-pct { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 700; text-align: center; color: var(--accent); margin-bottom: 4px; }
+  .quest-correct-slider { width: 100%; accent-color: var(--accent); }
+
 </style>
 </head>
 <body>
@@ -275,6 +346,8 @@
     <div class="stats-row" id="statsRow"></div>
   </div>
 </header>
+
+<div class="quest-panel" id="questPanelSlot"></div>
 
 <main>
   <div id="connBannerSlot"></div>
@@ -305,6 +378,7 @@
     <div class="view-toggle">
       <button class="chip active" id="viewGridBtn">▦ Grid</button>
       <button class="chip" id="viewTableBtn">☰ List</button>
+      <button class="chip" id="viewMapBtn">🗺️ Map</button>
     </div>
   </div>
 
@@ -337,6 +411,7 @@ const DEFAULT_KEY = "sb_publishable_TsgJYhPGkqN1pLJxSi6K7A_QnCHgyr_";
 let SUPABASE_URL = localStorage.getItem('shelf_supabase_url') || DEFAULT_URL;
 let SUPABASE_KEY = localStorage.getItem('shelf_supabase_key') || DEFAULT_KEY;
 let GEMINI_KEY = localStorage.getItem('shelf_gemini_key') || '';
+let QUEST_GOAL = parseInt(localStorage.getItem('shelf_quest_goal')) || 10; // daily minutes goal
 let supabase = null;
 let connected = false;
 
@@ -364,6 +439,7 @@ const STATUS_LABELS = {
 };
 
 let books = [];
+let readingLog = {}; // { 'YYYY-MM-DD': minutes } — powers the global quest streak
 let state = { search: '', category: '', status: '', sort: 'title', view: localStorage.getItem('shelf_view') || 'grid' };
 
 // ---------- Toast ----------
@@ -385,6 +461,7 @@ async function loadBooks() {
     return;
   }
   books = data;
+  await loadReadingLog();
   renderAll();
 }
 
@@ -423,6 +500,117 @@ async function checkInBook(book) {
     toast(`🔥 ${newStreak} day streak on "${book.title}"`);
   }
 }
+
+// ---------- Reading Quest: global daily-minutes log ----------
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function addDaysStr(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+async function loadReadingLog() {
+  if (!connected) { readingLog = {}; return; }
+  const { data, error } = await supabase.from('reading_log').select('*');
+  if (error) { readingLog = {}; return; }
+  readingLog = {};
+  data.forEach(row => { readingLog[row.log_date] = row.minutes; });
+}
+
+function questTodayMinutes() { return readingLog[todayStr()] || 0; }
+function questGoalMet() { return questTodayMinutes() >= QUEST_GOAL; }
+function questStreak() {
+  const today = todayStr();
+  const yest = addDaysStr(today, -1);
+  let cursor;
+  if ((readingLog[today] || 0) >= QUEST_GOAL) cursor = today;
+  else if ((readingLog[yest] || 0) >= QUEST_GOAL) cursor = yest;
+  else return 0;
+  let streak = 0;
+  while ((readingLog[cursor] || 0) >= QUEST_GOAL) { streak++; cursor = addDaysStr(cursor, -1); }
+  return streak;
+}
+function questStreakAtRisk() {
+  const today = todayStr();
+  const yest = addDaysStr(today, -1);
+  return (readingLog[yest] || 0) >= QUEST_GOAL && (readingLog[today] || 0) < QUEST_GOAL;
+}
+
+// Log minutes globally (always) and optionally toward a specific book's progress.
+async function logQuestMinutes(mins, book) {
+  if (!connected) { toast('Not connected to backend'); return; }
+  const today = todayStr();
+  const newTotal = (readingLog[today] || 0) + mins;
+  const { data, error } = await supabase.from('reading_log').upsert({ log_date: today, minutes: newTotal }).select();
+  if (error) { toast('Could not log minutes: ' + error.message); return; }
+  readingLog[today] = newTotal;
+  if (book) {
+    const saved = await saveBook({ id: book.id, quest_minutes: (book.quest_minutes || 0) + mins });
+    if (saved) books = books.map(x => x.id === saved.id ? saved : x);
+  }
+  renderQuestPanel();
+  renderGrid();
+  toast(`Logged ${mins} min${book ? ' toward "' + book.title + '"' : ''}`);
+}
+
+// Directly set a book's progress (e.g. "I've already read ~50%") without
+// touching the global daily log/streak, so it can't be gamed.
+async function setBookQuestProgress(book, mins) {
+  const saved = await saveBook({ id: book.id, quest_minutes: Math.max(0, Math.round(mins)) });
+  if (saved) { books = books.map(x => x.id === saved.id ? saved : x); }
+  return saved;
+}
+
+function estimatedTotalMinutes(book) {
+  // ~1.5 min/page is our running estimate; fall back to a reasonable default
+  // for books with no page count yet.
+  return book.length ? Math.round(book.length * 1.5) : 400;
+}
+
+function renderQuestPanel() {
+  const slot = document.getElementById('questPanelSlot');
+  if (!connected) { slot.innerHTML = ''; return; }
+  const streak = questStreak();
+  const met = questGoalMet();
+  const atRisk = questStreakAtRisk();
+  const today = questTodayMinutes();
+  const heat = Math.min(1, streak / 14);
+  const size = 30 + heat * 20;
+  const glow = met ? 0.6 + heat * 0.4 : atRisk ? 0.3 : 0.45;
+  const statusText = met
+    ? `Today's done — ${today} min logged. The chain holds.`
+    : atRisk
+    ? `Read ${QUEST_GOAL} min today or the streak breaks (${today}/${QUEST_GOAL} so far).`
+    : `${QUEST_GOAL} min today keeps it going (${today}/${QUEST_GOAL} so far).`;
+
+  slot.innerHTML = `
+    <div class="quest-card">
+      <div class="ember-wrap">
+        <div class="ember-glow ${met ? 'lit' : ''}" style="width:${size}px; height:${size}px; opacity:${glow};"></div>
+        <div class="ember-core"></div>
+      </div>
+      <div>
+        <div class="quest-streak-num">${streak}</div>
+        <div class="quest-streak-label">day${streak === 1 ? '' : 's'} streak</div>
+      </div>
+      <div class="quest-status">${statusText}</div>
+      <div class="quest-log-row">
+        ${[5, 10, 15, 20, 30].map(m => `<button class="quest-log-btn" data-qmins="${m}">+${m}m</button>`).join('')}
+      </div>
+    </div>`;
+  slot.querySelectorAll('[data-qmins]').forEach(btn => {
+    btn.onclick = () => {
+      const mins = parseInt(btn.dataset.qmins);
+      const activeBooks = books.filter(b => b.status === 'reading');
+      if (activeBooks.length === 1) {
+        logQuestMinutes(mins, activeBooks[0]);
+      } else {
+        logQuestMinutes(mins, null); // ambiguous or no active book — still counts toward the streak
+      }
+    };
+  });
+}
+
 
 // ---------- Rendering ----------
 function renderConnBanner(msg) {
@@ -490,6 +678,16 @@ function renderGrid() {
   const empty = document.getElementById('emptyState');
   empty.style.display = list.length === 0 ? 'block' : 'none';
 
+  if (state.view === 'map') {
+    empty.style.display = 'none';
+    container.className = '';
+    container.innerHTML = renderMapHtml();
+    container.querySelectorAll('[data-mapnode]').forEach(el => {
+      el.onclick = () => openBookModal(books.find(b => b.id === el.dataset.mapnode));
+    });
+    return;
+  }
+
   if (state.view === 'table') {
     container.className = 'table-wrap';
     container.innerHTML = renderTableHtml(list);
@@ -501,6 +699,62 @@ function renderGrid() {
     container.innerHTML = '';
     list.forEach(b => container.appendChild(bookCard(b)));
   }
+}
+
+const TIER_UNLOCK_THRESHOLD = 0.5; // fraction of a tier that must be 'read' to unlock the next
+
+function renderMapHtml() {
+  const cats = getCategories();
+  if (!cats.length) return `<div class="empty-state"><div class="big">No books yet</div><div>Add some books to see your map.</div></div>`;
+
+  return cats.map(cat => {
+    const catBooks = books.filter(b => b.category === cat);
+    const tiered = catBooks.filter(b => b.difficulty_tier);
+    const untiered = catBooks.filter(b => !b.difficulty_tier);
+
+    let prevTierUnlockedRatio = 1; // tier 1 always unlocked
+    const tierRows = [];
+    for (let t = 1; t <= 7; t++) {
+      const tierBooks = tiered.filter(b => b.difficulty_tier === t);
+      if (!tierBooks.length) continue;
+      const unlocked = t === 1 || prevTierUnlockedRatio >= TIER_UNLOCK_THRESHOLD;
+      const readCount = tierBooks.filter(b => b.status === 'read').length;
+      const ratio = tierBooks.length ? readCount / tierBooks.length : 0;
+
+      const nodesHtml = unlocked
+        ? tierBooks.map(b => `
+            <div class="map-node ${b.status === 'read' ? 'node-read' : ''}" data-mapnode="${b.id}">
+              <div class="map-node-title">${escapeHtml(b.title)}</div>
+              <div class="map-node-author">${escapeHtml(b.author || '')}</div>
+            </div>`).join('')
+        : `<div class="map-node node-locked"><div class="map-node-locked-label">🔒 ${tierBooks.length} book${tierBooks.length === 1 ? '' : 's'} — finish more of Tier ${t - 1} to unlock</div></div>`;
+
+      tierRows.push(`
+        <div class="map-tier-row">
+          <div class="map-tier-head">
+            <span class="map-tier-dot" style="background:${TIER_COLORS[t]}"></span>
+            Tier ${t} · ${TIER_LABELS[t]}
+            <span class="map-tier-progress">${unlocked ? `${readCount}/${tierBooks.length} read` : ''}</span>
+          </div>
+          <div class="map-nodes">${nodesHtml}</div>
+        </div>`);
+
+      if (unlocked) prevTierUnlockedRatio = ratio;
+      else prevTierUnlockedRatio = 0; // a locked tier blocks everything above it too
+    }
+
+    const untieredHtml = untiered.length ? `
+      <div class="map-tier-row">
+        <div class="map-tier-head"><span class="map-tier-dot" style="background:var(--muted)"></span>Unrated</div>
+        <div class="map-nodes">${untiered.map(b => `
+          <div class="map-node ${b.status === 'read' ? 'node-read' : ''}" data-mapnode="${b.id}">
+            <div class="map-node-title">${escapeHtml(b.title)}</div>
+            <div class="map-node-author">${escapeHtml(b.author || '')}</div>
+          </div>`).join('')}</div>
+      </div>` : '';
+
+    return `<div class="map-category"><div class="map-cat-title">${escapeHtml(cat)}</div>${tierRows.join('')}${untieredHtml}</div>`;
+  }).join('');
 }
 
 function renderTableHtml(list) {
@@ -588,9 +842,73 @@ function renderAll() {
   renderStats();
   renderChips();
   renderGrid();
+  renderQuestPanel();
 }
 
 // ---------- Modal: Add/Edit Book ----------
+// ---------- Reading Quest: per-book progress section (inside modal) ----------
+function renderQuestModalSection(overlay, book) {
+  const slot = overlay.querySelector('#questModalSlot');
+  if (!slot) return;
+
+  function draw(correctorOpen, draftPct) {
+    const total = estimatedTotalMinutes(book);
+    const mins = book.quest_minutes || 0;
+    const pct = Math.min(100, Math.round((mins / total) * 100));
+    const totalDays = Math.max(1, Math.ceil(total / QUEST_GOAL));
+    const daysDone = Math.min(totalDays, Math.floor(mins / QUEST_GOAL));
+
+    const stairs = Array.from({ length: totalDays }).map((_, i) =>
+      `<span class="quest-stair ${i < daysDone ? 'lit' : ''}"></span>`).join('');
+
+    slot.innerHTML = `
+      <div class="quest-modal-section">
+        <div class="quest-modal-label">Reading progress · ${pct}%</div>
+        <div class="quest-stairs">${stairs}</div>
+        <div class="quest-modal-mins">${mins} of ~${total} min · about ${totalDays} days at ${QUEST_GOAL} min/day</div>
+        <div class="quest-modal-actions">
+          ${[5, 10, 15, 20, 30].map(m => `<button class="quest-log-btn" data-qmodal="${m}">+${m}m</button>`).join('')}
+        </div>
+        ${correctorOpen ? `
+          <div class="quest-correct-panel">
+            <div class="quest-correct-pct">${draftPct}%</div>
+            <input type="range" min="0" max="100" step="1" value="${draftPct}" class="quest-correct-slider" id="qCorrectSlider" />
+            <div class="quest-modal-actions" style="margin-top:8px;">
+              <button class="btn secondary" id="qCorrectCancel" style="font-size:12px; padding:6px 10px;">cancel</button>
+              <button class="btn accent" id="qCorrectApply" style="font-size:12px; padding:6px 10px;">Set progress</button>
+            </div>
+          </div>
+        ` : `<button class="quest-correct-toggle" id="qCorrectOpen">Already read some of this? Set your progress →</button>`}
+      </div>`;
+
+    slot.querySelectorAll('[data-qmodal]').forEach(btn => {
+      btn.onclick = async () => {
+        await logQuestMinutes(parseInt(btn.dataset.qmodal), book);
+        book = books.find(x => x.id === book.id) || book;
+        draw(false, pct);
+      };
+    });
+
+    if (correctorOpen) {
+      const slider = slot.querySelector('#qCorrectSlider');
+      const pctLabel = slot.querySelector('.quest-correct-pct');
+      slider.oninput = () => { pctLabel.textContent = slider.value + '%'; };
+      slot.querySelector('#qCorrectCancel').onclick = () => draw(false, pct);
+      slot.querySelector('#qCorrectApply').onclick = async () => {
+        const newPct = parseInt(slider.value);
+        const saved = await setBookQuestProgress(book, (newPct / 100) * total);
+        if (saved) book = saved;
+        renderQuestPanel();
+        draw(false, newPct);
+      };
+    } else {
+      slot.querySelector('#qCorrectOpen').onclick = () => draw(true, pct);
+    }
+  }
+
+  draw(false, 0);
+}
+
 function openBookModal(book) {
   const isNew = !book;
   const b = book || { title: '', author: '', category: state.category || (getCategories()[0] || ''), length: '', format: '', status: 'want_to_read', difficulty_tier: null, rating: null, notes: '' };
@@ -662,6 +980,8 @@ function openBookModal(book) {
         <textarea id="f_notes" rows="3" placeholder="Thoughts, quotes, why you added it…">${escapeHtml(b.notes || '')}</textarea>
       </div>
 
+      ${!isNew ? `<div id="questModalSlot"></div>` : ''}
+
       <div class="modal-actions">
         ${!isNew ? `<button class="btn secondary left" id="deleteBtn" style="color:#8a3b2f; border-color:#8a3b2f;">Delete</button>` : ''}
         <button class="btn secondary" id="cancelBtn">Cancel</button>
@@ -670,6 +990,7 @@ function openBookModal(book) {
     </div>
   `;
   document.getElementById('modalSlot').appendChild(overlay);
+  if (!isNew) renderQuestModalSection(overlay, b);
 
   let selectedStatus = b.status;
   let selectedTier = b.difficulty_tier;
@@ -934,6 +1255,11 @@ function openSettingsModal() {
         <input type="text" id="s_gemini" value="${escapeHtml(GEMINI_KEY)}" placeholder="AIza..." />
         <div style="font-size:12px; color:var(--muted); margin-top:6px;">Get a free key at aistudio.google.com/apikey — no card needed.</div>
       </div>
+      <div class="field" style="margin-top:20px; border-top:1px solid var(--line); padding-top:16px;">
+        <label>Daily reading goal (minutes)</label>
+        <input type="text" id="s_quest_goal" value="${QUEST_GOAL}" placeholder="10" />
+        <div style="font-size:12px; color:var(--muted); margin-top:6px;">Minutes/day to keep your streak ember lit. Keep it small — you can always read more.</div>
+      </div>
       <div class="modal-actions">
         <button class="btn secondary" id="cancelSettings">Cancel</button>
         <button class="btn accent" id="saveSettings">Save & connect</button>
@@ -947,9 +1273,11 @@ function openSettingsModal() {
     SUPABASE_URL = overlay.querySelector('#s_url').value.trim();
     SUPABASE_KEY = overlay.querySelector('#s_key').value.trim();
     GEMINI_KEY = overlay.querySelector('#s_gemini').value.trim();
+    QUEST_GOAL = parseInt(overlay.querySelector('#s_quest_goal').value) || 10;
     localStorage.setItem('shelf_supabase_url', SUPABASE_URL);
     localStorage.setItem('shelf_supabase_key', SUPABASE_KEY);
     localStorage.setItem('shelf_gemini_key', GEMINI_KEY);
+    localStorage.setItem('shelf_quest_goal', QUEST_GOAL);
     initSupabase();
     overlay.remove();
     loadBooks();
@@ -965,11 +1293,13 @@ document.getElementById('addFab').onclick = () => openBookModal(null);
 document.getElementById('settingsFab').onclick = () => openSettingsModal();
 document.getElementById('viewGridBtn').onclick = () => setView('grid');
 document.getElementById('viewTableBtn').onclick = () => setView('table');
+document.getElementById('viewMapBtn').onclick = () => setView('map');
 function setView(v) {
   state.view = v;
   localStorage.setItem('shelf_view', v);
   document.getElementById('viewGridBtn').classList.toggle('active', v === 'grid');
   document.getElementById('viewTableBtn').classList.toggle('active', v === 'table');
+  document.getElementById('viewMapBtn').classList.toggle('active', v === 'map');
   renderGrid();
 }
 document.getElementById('randomBtn').onclick = () => {
