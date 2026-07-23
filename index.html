@@ -312,6 +312,10 @@
   .map-node.node-locked { background: var(--paper-2); color: var(--muted); cursor: default; opacity: .65; }
   .map-node-title { font-weight: 600; font-size: 13px; line-height: 1.25; }
   .map-node-author { font-size: 11px; color: var(--muted); }
+  .map-node-badge {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+    color: var(--accent-2); margin-bottom: 2px;
+  }
   .map-node-locked-label { font-size: 12px; color: var(--muted); }
 
   /* ---------- Per-book quest section (inside modal) ---------- */
@@ -440,6 +444,7 @@ const STATUS_LABELS = {
 
 let books = [];
 let readingLog = {}; // { 'YYYY-MM-DD': minutes } — powers the global quest streak
+let bookPrereqs = []; // [{ book_id, prereq_book_id }] — manual "reading X unlocks Y" links
 let state = { search: '', category: '', status: '', sort: 'title', view: localStorage.getItem('shelf_view') || 'grid' };
 
 // ---------- Toast ----------
@@ -462,6 +467,7 @@ async function loadBooks() {
   }
   books = data;
   await loadReadingLog();
+  await loadBookPrereqs();
   renderAll();
 }
 
@@ -515,6 +521,46 @@ async function loadReadingLog() {
   if (error) { readingLog = {}; return; }
   readingLog = {};
   data.forEach(row => { readingLog[row.log_date] = row.minutes; });
+}
+
+// ---------- Manual "reading X unlocks Y" prerequisites ----------
+async function loadBookPrereqs() {
+  if (!connected) { bookPrereqs = []; return; }
+  const { data, error } = await supabase.from('book_prereqs').select('*');
+  if (error) { bookPrereqs = []; return; }
+  bookPrereqs = data;
+}
+
+async function addBookPrereq(bookId, prereqBookId) {
+  if (!connected) { toast('Not connected to backend'); return; }
+  if (bookId === prereqBookId) return;
+  const exists = bookPrereqs.some(p => p.book_id === bookId && p.prereq_book_id === prereqBookId);
+  if (exists) return;
+  const { data, error } = await supabase.from('book_prereqs').insert({ book_id: bookId, prereq_book_id: prereqBookId }).select();
+  if (error) { toast('Could not add prerequisite: ' + error.message); return; }
+  bookPrereqs.push(data[0]);
+}
+
+async function removeBookPrereq(bookId, prereqBookId) {
+  if (!connected) { toast('Not connected to backend'); return; }
+  const { error } = await supabase.from('book_prereqs').delete().eq('book_id', bookId).eq('prereq_book_id', prereqBookId);
+  if (error) { toast('Could not remove prerequisite: ' + error.message); return; }
+  bookPrereqs = bookPrereqs.filter(p => !(p.book_id === bookId && p.prereq_book_id === prereqBookId));
+}
+
+// A book unlocked by manual prereqs: it has at least one prereq link, and
+// every linked prerequisite book is marked 'read'.
+function computeManualUnlocks(allBooks) {
+  const byId = Object.fromEntries(allBooks.map(b => [b.id, b]));
+  const reqsByBook = {};
+  bookPrereqs.forEach(p => { (reqsByBook[p.book_id] = reqsByBook[p.book_id] || []).push(p.prereq_book_id); });
+  const unlocked = new Set();
+  Object.entries(reqsByBook).forEach(([bookId, prereqIds]) => {
+    if (prereqIds.length && prereqIds.every(pid => byId[pid] && byId[pid].status === 'read')) {
+      unlocked.add(bookId);
+    }
+  });
+  return unlocked;
 }
 
 function questTodayMinutes() { return readingLog[todayStr()] || 0; }
@@ -702,21 +748,66 @@ function renderGrid() {
 }
 
 const TIER_UNLOCK_THRESHOLD = 0.5; // fraction of a tier that must be 'read' to unlock the next tier
-const TIER_SLOT_SIZE = 3; // how many not-yet-started books are revealed at once, per tier
+const TIER_SLOT_SIZE = 6; // how many not-yet-started books are revealed at once, per tier
 
-// Which books in a tier are actually revealed right now: anything already
-// 'reading' or 'read' always shows, plus just enough of the shortest
-// not-yet-started books to fill the slot count. Finishing (or dropping) one
-// frees a slot and the next-shortest book in the queue drips in.
-function tierRevealed(tierBooks) {
-  const engaged = tierBooks.filter(b => b.status === 'reading' || b.status === 'read' || b.manual_add);
+// ---------- Series detection: "Title (Series Name #N)" ----------
+// Many titles already carry series info in this format (it's the same
+// pattern the cover-art lookup strips out). We use it to build real
+// prerequisite chains: finishing book N of a series reveals book N+1,
+// regardless of tier locks or queue slots — the "Hobbit unlocks LOTR" case.
+function parseSeriesInfo(title) {
+  const m = (title || '').match(/^(.*)\s\(([^()#]+?)\s*#(\d+)\)\s*$/);
+  if (!m) return null;
+  return { series: m[2].trim().toLowerCase(), num: parseInt(m[3], 10) };
+}
+
+function computeSeriesUnlocks(allBooks) {
+  const groups = {};
+  allBooks.forEach(b => {
+    const info = parseSeriesInfo(b.title);
+    if (!info) return;
+    (groups[info.series] = groups[info.series] || []).push({ book: b, num: info.num });
+  });
+  const unlocked = new Set(); // book ids unlocked purely by a finished predecessor
+  Object.values(groups).forEach(list => {
+    list.sort((a, b) => a.num - b.num);
+    for (let i = 1; i < list.length; i++) {
+      if (list[i - 1].book.status === 'read') unlocked.add(list[i].book.id);
+    }
+  });
+  return unlocked;
+}
+
+// Softer queue order: group by author first (so a favorite author's books
+// surface together, which reads as more intentional than a pure length
+// ladder), length only breaks ties within the same author.
+function queueSort(a, b) {
+  const byAuthor = (a.author || '').localeCompare(b.author || '');
+  if (byAuthor !== 0) return byAuthor;
+  return (a.length || 99999) - (b.length || 99999);
+}
+
+// Decide what's actually shown for one tier: series-unlocked, manually-added,
+// and prereq-unlocked books always show (they bypass locks and slots entirely
+// and don't eat into the slot budget); everything else follows the normal
+// tier-gate + slot-queue rules.
+function computeTierDisplay(tierBooks, tierGateUnlocked, seriesUnlockedSet, manualUnlockedSet) {
+  const alwaysShow = tierBooks.filter(b => b.manual_add || seriesUnlockedSet.has(b.id) || manualUnlockedSet.has(b.id));
+  const alwaysShowIds = new Set(alwaysShow.map(b => b.id));
+
+  if (!tierGateUnlocked) {
+    return { shown: alwaysShow, lockedCount: tierBooks.length - alwaysShow.length, gateLocked: true };
+  }
+
+  const engaged = tierBooks.filter(b => (b.status === 'reading' || b.status === 'read') && !alwaysShowIds.has(b.id));
   const queue = tierBooks
-    .filter(b => b.status !== 'reading' && b.status !== 'read' && !b.manual_add)
-    .sort((a, b) => (a.length || 99999) - (b.length || 99999));
+    .filter(b => b.status !== 'reading' && b.status !== 'read' && !alwaysShowIds.has(b.id))
+    .sort(queueSort);
   const readingCount = tierBooks.filter(b => b.status === 'reading').length;
   const slotsLeft = Math.max(0, TIER_SLOT_SIZE - readingCount);
   const revealedQueue = queue.slice(0, slotsLeft);
-  return new Set([...engaged, ...revealedQueue].map(b => b.id));
+  const shown = [...alwaysShow, ...engaged, ...revealedQueue];
+  return { shown, lockedCount: tierBooks.length - shown.length, gateLocked: false };
 }
 
 function renderMapHtml() {
@@ -724,30 +815,35 @@ function renderMapHtml() {
   const untiered = books.filter(b => !b.difficulty_tier);
   if (!books.length) return `<div class="empty-state"><div class="big">No books yet</div><div>Add some books to see your map.</div></div>`;
 
+  const seriesUnlockedSet = computeSeriesUnlocks(books);
+  const manualUnlockedSet = computeManualUnlocks(books);
+
   let prevTierUnlockedRatio = 1; // tier 1 always unlocked
   const tierRows = [];
   for (let t = 1; t <= 7; t++) {
     const tierBooks = tiered.filter(b => b.difficulty_tier === t);
     if (!tierBooks.length) continue;
-    const unlocked = t === 1 || prevTierUnlockedRatio >= TIER_UNLOCK_THRESHOLD;
+    const gateUnlocked = t === 1 || prevTierUnlockedRatio >= TIER_UNLOCK_THRESHOLD;
     const readCount = tierBooks.filter(b => b.status === 'read').length;
     const ratio = tierBooks.length ? readCount / tierBooks.length : 0;
 
-    let nodesHtml;
-    if (!unlocked) {
-      nodesHtml = `<div class="map-node node-locked"><div class="map-node-locked-label">🔒 ${tierBooks.length} book${tierBooks.length === 1 ? '' : 's'} — finish more of Tier ${t - 1} to unlock</div></div>`;
-    } else {
-      const revealed = tierRevealed(tierBooks);
-      const shown = tierBooks.filter(b => revealed.has(b.id));
-      const waiting = tierBooks.length - shown.length;
-      nodesHtml = shown.map(b => `
+    const { shown, lockedCount } = computeTierDisplay(tierBooks, gateUnlocked, seriesUnlockedSet, manualUnlockedSet);
+    let nodesHtml = shown.map(b => {
+      const isSeriesUnlock = seriesUnlockedSet.has(b.id) && !b.manual_add;
+      const isManualUnlock = !isSeriesUnlock && manualUnlockedSet.has(b.id) && !b.manual_add;
+      const badge = isSeriesUnlock ? '📖 sequel unlocked' : isManualUnlock ? '✨ ready for this now' : '';
+      return `
         <div class="map-node ${b.status === 'read' ? 'node-read' : ''}" data-mapnode="${b.id}">
+          ${badge ? `<div class="map-node-badge">${badge}</div>` : ''}
           <div class="map-node-title">${escapeHtml(b.title)}</div>
           <div class="map-node-author">${escapeHtml(b.author || '')}${b.category ? ' · ' + escapeHtml(b.category) : ''}</div>
-        </div>`).join('');
-      if (waiting > 0) {
-        nodesHtml += `<div class="map-node node-locked"><div class="map-node-locked-label">+${waiting} more waiting — finish one above to reveal the next</div></div>`;
-      }
+        </div>`;
+    }).join('');
+    if (lockedCount > 0) {
+      const label = gateUnlocked
+        ? `+${lockedCount} more waiting — finish one above to reveal the next`
+        : `🔒 ${lockedCount} book${lockedCount === 1 ? '' : 's'} — finish more of Tier ${t - 1} to unlock`;
+      nodesHtml += `<div class="map-node node-locked"><div class="map-node-locked-label">${label}</div></div>`;
     }
 
     tierRows.push(`
@@ -755,12 +851,12 @@ function renderMapHtml() {
         <div class="map-tier-head">
           <span class="map-tier-dot" style="background:${TIER_COLORS[t]}"></span>
           Tier ${t} · ${TIER_LABELS[t]}
-          <span class="map-tier-progress">${unlocked ? `${readCount}/${tierBooks.length} read` : ''}</span>
+          <span class="map-tier-progress">${gateUnlocked ? `${readCount}/${tierBooks.length} read` : ''}</span>
         </div>
         <div class="map-nodes">${nodesHtml}</div>
       </div>`);
 
-    if (unlocked) prevTierUnlockedRatio = ratio;
+    if (gateUnlocked) prevTierUnlockedRatio = ratio;
     else prevTierUnlockedRatio = 0; // a locked tier blocks everything above it too
   }
 
