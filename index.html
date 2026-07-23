@@ -709,9 +709,9 @@ const TIER_SLOT_SIZE = 3; // how many not-yet-started books are revealed at once
 // not-yet-started books to fill the slot count. Finishing (or dropping) one
 // frees a slot and the next-shortest book in the queue drips in.
 function tierRevealed(tierBooks) {
-  const engaged = tierBooks.filter(b => b.status === 'reading' || b.status === 'read');
+  const engaged = tierBooks.filter(b => b.status === 'reading' || b.status === 'read' || b.manual_add);
   const queue = tierBooks
-    .filter(b => b.status !== 'reading' && b.status !== 'read')
+    .filter(b => b.status !== 'reading' && b.status !== 'read' && !b.manual_add)
     .sort((a, b) => (a.length || 99999) - (b.length || 99999));
   const readingCount = tierBooks.filter(b => b.status === 'reading').length;
   const slotsLeft = Math.max(0, TIER_SLOT_SIZE - readingCount);
@@ -1161,6 +1161,7 @@ function openBookModal(book) {
       notes: overlay.querySelector('#f_notes').value.trim() || null,
       date_finished: selectedStatus === 'read' ? (overlay.querySelector('#f_date_finished')?.value || null) : (b.date_finished || null),
     };
+    if (isNew) payload.manual_add = true; // added by hand -> always unlocked on the Map, never queued
     if (!isNew) payload.id = b.id;
     const justFinished = selectedStatus === 'read' && b.status !== 'read';
     const saved = await saveBook(payload);
