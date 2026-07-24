@@ -1259,6 +1259,9 @@ function openBookModal(book) {
     };
     if (isNew) payload.manual_add = true; // added by hand -> always unlocked on the Map, never queued
     if (!isNew) payload.id = b.id;
+    // Marking a book 'read' should always complete its progress bar to 100%,
+    // regardless of how many minutes happened to be logged toward it.
+    if (selectedStatus === 'read') payload.quest_minutes = estimatedTotalMinutes({ length: payload.length });
     const justFinished = selectedStatus === 'read' && b.status !== 'read';
     const saved = await saveBook(payload);
     if (saved) {
