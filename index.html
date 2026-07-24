@@ -829,8 +829,8 @@ function renderMapHtml() {
 
     const { shown, lockedCount } = computeTierDisplay(tierBooks, gateUnlocked, seriesUnlockedSet, manualUnlockedSet);
     let nodesHtml = shown.map(b => {
-      const isSeriesUnlock = seriesUnlockedSet.has(b.id) && !b.manual_add;
-      const isManualUnlock = !isSeriesUnlock && manualUnlockedSet.has(b.id) && !b.manual_add;
+      const isSeriesUnlock = b.status !== 'read' && seriesUnlockedSet.has(b.id) && !b.manual_add;
+      const isManualUnlock = b.status !== 'read' && !isSeriesUnlock && manualUnlockedSet.has(b.id) && !b.manual_add;
       const badge = isSeriesUnlock ? '📖 sequel unlocked' : isManualUnlock ? '✨ ready for this now' : '';
       return `
         <div class="map-node ${b.status === 'read' ? 'node-read' : ''}" data-mapnode="${b.id}">
